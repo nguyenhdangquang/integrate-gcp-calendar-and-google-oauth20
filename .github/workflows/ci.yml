@@ -1,0 +1,75 @@
+name: Test & Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  WORKLOAD_IDENTITY_POOL_PROVIDER: projects/42708300348/locations/global/workloadIdentityPools/github/providers/github-provider
+  SERVICE_ACCOUNT: github-actions@level-clone-349910.iam.gserviceaccount.com
+  REGION: us-east1
+  PROJECT_ID: level-clone-349910
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      checks: write
+    strategy:
+      matrix:
+        node-version: [14.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run test:ci
+
+      # We use this action for test reporter: https://github.com/dorny/test-reporter
+      - name: Test Report
+        uses: dorny/test-reporter@v1
+        if: success() || failure() # run this step even if previous step failed
+        with:
+          name: JEST Tests # Name of the check run which will be created
+          path: reports/jest-*.xml # Path to test results
+          reporter: jest-junit # Format of test results
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    if: |
+      always() &&
+      (github.event.pull_request.merged == true || github.event_name == 'push') &&
+      needs.test.result == 'success'
+    permissions:
+      id-token: write
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v3
+      - name: Get Short SHA
+        id: sha
+        run: echo "::set-output name=sha8::$(echo ${GITHUB_SHA} | cut -c1-8)"
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v0
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_POOL_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Build and Push Docker Image
+        run: |
+          echo '${{ steps.auth.outputs.access_token }}' | docker login -u oauth2accesstoken --password-stdin https://${{ env.REGION }}-docker.pkg.dev
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/zenith/backend:${{ steps.sha.outputs.sha8 }} .
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/zenith/backend:latest .
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/zenith/backend:${{ steps.sha.outputs.sha8 }}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/zenith/backend:latest

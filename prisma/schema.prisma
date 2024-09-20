@@ -1,0 +1,188 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProviderType {
+  google
+  microsoft
+
+  @@map("provider_type")
+}
+
+model Language {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  name      String   @db.VarChar
+  code      String   @unique @db.VarChar
+
+  user User[]
+
+  @@map("language")
+}
+
+model User {
+  id                      Int       @id @default(autoincrement())
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+  firstName               String?   @map("first_name") @db.VarChar
+  lastName                String?   @map("last_name") @db.VarChar
+  displayName             String?   @map("display_name") @db.VarChar
+  usernameUnique          String?   @map("username_unique") @db.VarChar
+  dob                     DateTime? @db.Date
+  email                   String?   @unique @db.VarChar
+  phone                   String?   @unique @db.VarChar
+  password                String?   @db.VarChar
+  isActive                Boolean?  @default(true) @map("is_active") @db.Boolean
+  avatarUrl               String?   @map("avatar_url") @db.VarChar
+  selectedLanguageId      Int?      @map("selected_language_id")
+  confirmationToken       String    @default("") @map("confirmation_token")
+  confirmationTokenSentAt DateTime? @map("confirmation_sent_at")
+  recoveryToken           String    @default("") @map("recovery_token")
+  recoverySentAt          DateTime? @map("recovery_sent_at")
+  resetPassToken          String    @default("") @map("reset_pass_token")
+  resetPassTokenSentAt    DateTime? @map("reset_pass_token_sent_at")
+
+  language               Language?               @relation(fields: [selectedLanguageId], references: [id])
+  externalAuthenticators ExternalAuthenticator[]
+
+  refreshTokens        RefreshToken[]
+  calendars            Calendar[]
+  calendarVisibilities CalendarVisibility[]
+  events               Event[]
+  eventAttended        EventAttendee[]
+
+  @@map("user")
+}
+
+// https://stackoverflow.com/questions/24748208/how-can-i-integrate-social-login-to-my-existing-user-schema-login-system
+// https://stackoverflow.com/questions/6666267/architecture-for-merging-multiple-user-accounts-together?rq=1
+// https://stackoverflow.com/questions/21568223/how-should-i-correctly-integrate-social-media-sso-with-my-custom-login-service?rq=1
+// https://www.reddit.com/r/PostgreSQL/comments/qvw2zv/how_can_i_handle_multiple_social_accounts_per/
+// https://stackoverflow.com/questions/4793302/database-structure-for-social-login-implementation
+model ExternalAuthenticator {
+  id             Int          @id @default(autoincrement())
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  userId         Int          @map("user_id")
+  providerType   ProviderType @map("provider_type")
+  providerUserId String       @map("provider_user_id") @db.VarChar
+  accessToken    String       @map("access_token") @db.VarChar
+  refreshToken   String?      @map("refresh_token") @db.VarChar
+  idToken        String?      @map("id_token") @db.VarChar
+
+  user     User      @relation(fields: [userId], references: [id])
+  calendar Calendar?
+
+  @@unique([userId, providerType, providerUserId])
+  @@map("external_authenticator")
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  userId    Int      @map("user_id")
+  token     String   @db.VarChar
+  parentId  Int      @map("parent_id")
+
+  user     User           @relation(fields: [userId], references: [id])
+  parent   RefreshToken?  @relation("RefreshTokenFamily", fields: [parentId], references: [id])
+  children RefreshToken[] @relation("RefreshTokenFamily")
+
+  @@map("refresh_token")
+}
+
+model Calendar {
+  id                   Int          @id @default(autoincrement())
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  userId               Int          @map("user_id")
+  authenticatorId      Int          @unique @map("authenticator_id")
+  email                String       @map("email") @db.VarChar
+  providerType         ProviderType @map("provider_type")
+  name                 String       @map("name") @db.VarChar
+  calendarNameUnique   String       @map("calendarname_unique") @db.VarChar
+  colour               String?      @map("colour") @db.VarChar
+  profilePictureUrl    String?      @map("profile_picture_url") @db.VarChar
+  backgroundPictureUrl String?      @map("background_picture_url") @db.VarChar
+  logoUrl              String?      @map("logo_url") @db.VarChar
+  availableStartTime   DateTime     @map("available_start_time") @db.Time
+  availableEndTime     DateTime     @map("available_end_time") @db.Time
+  availableWeekDays    Int          @map("available_week_days") @db.SmallInt
+  isDisabled           Boolean      @default(false) @map("is_disabled") @db.Boolean
+
+  user                     User                  @relation(fields: [userId], references: [id])
+  authenticator            ExternalAuthenticator @relation(fields: [authenticatorId], references: [id])
+  sourceCalendarVisibility CalendarVisibility?   @relation("sourceCalendarVisibility")
+  events                   Event[]
+
+  @@map("calendar")
+}
+
+model CalendarVisibility {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  userId    Int      @map("user_id")
+  sourceId  Int      @unique @map("source_id")
+  showAs    String   @default("") @db.VarChar
+
+  user   User     @relation(fields: [userId], references: [id])
+  source Calendar @relation("sourceCalendarVisibility", fields: [sourceId], references: [id])
+
+  @@map("calendar_visibility")
+}
+
+enum EventRepeatByEnum {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+
+  @@map("event_repeat_by_enum")
+}
+
+model Event {
+  id          Int               @id @default(autoincrement())
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  createdById Int               @map("created_by_id")
+  calendarId  Int               @map("calendar_id")
+  from        DateTime
+  to          DateTime
+  details     String?           @db.Text
+  eventLink   String?           @map("event_link")
+  title       String?
+  repeatBy    EventRepeatByEnum @default(NONE)
+  metadata    Json?             @db.JsonB
+
+  createdBy User            @relation(fields: [createdById], references: [id])
+  calendar  Calendar        @relation(fields: [calendarId], references: [id])
+  attendees EventAttendee[]
+
+  @@map("event")
+}
+
+model EventAttendee {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  eventId   Int      @map("event_id")
+  userId    Int?     @map("user_id")
+  email     String   @db.VarChar
+
+  event Event @relation(fields: [eventId], references: [id])
+  user  User? @relation(fields: [userId], references: [id])
+
+  @@map("event_attendee")
+}
